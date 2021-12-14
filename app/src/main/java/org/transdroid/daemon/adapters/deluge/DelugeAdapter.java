@@ -148,7 +148,6 @@ public class DelugeAdapter implements IDaemonAdapter {
 
     private DaemonSettings settings;
     private DefaultHttpClient httpclient;
-    private Cookie sessionCookie;
     private int version = -1;
 
     public DelugeAdapter(DaemonSettings settings) {
@@ -468,6 +467,17 @@ public class DelugeAdapter implements IDaemonAdapter {
 
     }
 
+    private boolean isAuthenticated() {
+        List<Cookie> cookies = httpclient.getCookieStore().getCookies();
+        for (Cookie c : cookies) {
+            if (c.getName().equals(RPC_SESSION_ID)) {
+                // And here it is!  Okay, no need authenticate again.
+                return true;
+            }
+        }
+        return false;
+    }
+
     private synchronized JSONObject makeRequest(JSONObject data, Log log) throws DaemonException {
 
         try {
@@ -475,8 +485,8 @@ public class DelugeAdapter implements IDaemonAdapter {
             // Initialise the HTTP client
             initialise();
 
-            // Login first?
-            if (sessionCookie == null) {
+            //Check to see if we are already logged in
+            if (!isAuthenticated()) {
 
                 // Build login object
                 String extraPass = settings.getExtraPassword();
@@ -498,18 +508,9 @@ public class DelugeAdapter implements IDaemonAdapter {
                 HttpResponse response = httpclient.execute(httppost);
                 InputStream instream = response.getEntity().getContent();
 
-                // Retrieve session ID
-                if (!httpclient.getCookieStore().getCookies().isEmpty()) {
-                    for (Cookie cookie : httpclient.getCookieStore().getCookies()) {
-                        if (cookie.getName().equals(RPC_SESSION_ID)) {
-                            sessionCookie = cookie;
-                            break;
-                        }
-                    }
-                }
 
                 // Still no session cookie?
-                if (sessionCookie == null) {
+                if(!isAuthenticated()) {
                     // Set error message and cancel the action that was requested
                     throw new DaemonException(ExceptionType.AuthenticationFailure, "Password error? Server time difference? No (valid) cookie in " +
                             "response and JSON was: " + HttpHelper.convertStreamToString(instream));
@@ -524,18 +525,6 @@ public class DelugeAdapter implements IDaemonAdapter {
             httppost.setHeader("content-type", "application/json");
             StringEntity se = new StringEntity(data.toString(), HTTP.UTF_8);
             httppost.setEntity(se);
-
-            // Set session cookie, if it was not in the httpclient object yet
-            boolean cookiePresent = false;
-            for (Cookie cookie : httpclient.getCookieStore().getCookies()) {
-                if (cookie.getName().equals(RPC_SESSION_ID)) {
-                    cookiePresent = true;
-                    break;
-                }
-            }
-            if (!cookiePresent) {
-                httpclient.getCookieStore().addCookie(sessionCookie);
-            }
 
             // Execute
             HttpResponse response = httpclient.execute(httppost);
